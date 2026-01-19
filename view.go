@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 )
@@ -9,22 +10,23 @@ import (
 var (
 	inputBorder = lipgloss.NewStyle().
 			BorderStyle(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("#36b8ff"))
+			BorderForeground(lipgloss.Color("#36b8ff")).
+			Padding(0, 1)
+
+	inputLabelStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#36b8ff")).
+			Bold(true)
 
 	listItemStyle = lipgloss.NewStyle().
-			PaddingTop(1).
+			PaddingTop(0).
 			PaddingRight(2).
-			PaddingBottom(1).
+			PaddingBottom(0).
 			PaddingLeft(2)
 
 	greetingStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.AdaptiveColor{
 			Light: "#36b8ff",
 			Dark:  "#36b8ff",
-		}).
-		Background(lipgloss.AdaptiveColor{
-			Light: "",
-			Dark:  "",
 		})
 
 	tasksHeadingStyle = lipgloss.NewStyle().
@@ -46,7 +48,12 @@ var (
 			Foreground(lipgloss.Color("#36b8ff"))
 
 	completedTaskStyle = lipgloss.NewStyle().
-			Strikethrough(true)
+				Strikethrough(true).
+				Foreground(lipgloss.Color("#666666"))
+
+	categoryTagStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#ffb836")).
+				Bold(true)
 
 	emptyStateStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.AdaptiveColor{
@@ -54,45 +61,178 @@ var (
 				Dark:  "#666666",
 			}).
 			Italic(true).
-			Align(lipgloss.Center).
-			PaddingTop(2).
+			PaddingTop(1).
 			PaddingBottom(1)
+
+	dropdownStyle = lipgloss.NewStyle().
+			BorderStyle(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("#444444")).
+			Padding(0, 1).
+			MarginLeft(2)
+
+	dropdownItemStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#aaaaaa"))
+
+	dropdownSelectedStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#36b8ff")).
+				Bold(true)
+
+	filterIndicatorStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#ffb836")).
+				Bold(true).
+				Padding(0, 1).
+				MarginBottom(1)
 )
 
-var (
-	greetingText = `  _____  _    ____  _  ___   _ ___
+var greetingText = `  _____  _    ____  _  ___   _ ___
  |_   _|/ \  / ___|| |/ / | | |_ _|
    | | / _ \ \___ \| ' /| | | || |
    | |/ ___ \ ___) | . \| |_| || |
    |_/_/   \_\____/|_|\_\\___/|___|
-
 `
-)
 
 func (m model) View() string {
-	s := "\n\n" + greetingStyle.Render(greetingText) + "\n\n"
+	var s strings.Builder
 
-	// Only show text input in add or edit modes (1 = edit, 2 = add)
-	if m.view == 1 || m.view == 2 {
-		s += "\n" + inputBorder.Render(m.textInput.View()) + "\n"
+	s.WriteString("\n" + greetingStyle.Render(greetingText) + "\n\n")
+
+	// Render based on current view
+	switch m.view {
+	case viewAddCategory, viewEditCategory:
+		s.WriteString(m.renderCategoryInput())
+	case viewAddTask, viewEditTask:
+		s.WriteString(m.renderTaskInput())
+	case viewFilter:
+		s.WriteString(m.renderFilterInput())
+	default:
+		s.WriteString(m.renderTaskList())
 	}
 
-	// Tasks heading
-	s += tasksHeadingStyle.Render("Tasks") + "\n"
+	return s.String()
+}
+
+func (m model) renderCategoryInput() string {
+	var s strings.Builder
+
+	title := "Add Task"
+	if m.view == viewEditCategory {
+		title = "Edit Task"
+	}
+	s.WriteString(tasksHeadingStyle.Render(title) + "\n\n")
+
+	s.WriteString(inputLabelStyle.Render("Category:") + "\n")
+	s.WriteString(inputBorder.Render(m.categoryInput.View()) + "\n")
+
+	// Render category dropdown
+	if len(m.filteredCategories) > 0 {
+		s.WriteString(m.renderCategoryDropdown())
+	} else if m.categoryInput.Value() != "" {
+		s.WriteString(dropdownStyle.Render("(new category will be created)") + "\n")
+	}
+
+	s.WriteString("\n" + shortcutsStyle.Render("↑/↓ navigate • tab autocomplete • enter confirm • esc cancel") + "\n")
+
+	return s.String()
+}
+
+func (m model) renderTaskInput() string {
+	var s strings.Builder
+
+	title := "Add Task"
+	if m.view == viewEditTask {
+		title = "Edit Task"
+	}
+	s.WriteString(tasksHeadingStyle.Render(title) + "\n\n")
+
+	// Show selected category
+	catDisplay := "(uncategorized)"
+	if m.selectedCategory != nil {
+		catDisplay = categoryTagStyle.Render("[" + m.selectedCategory.Name + "]")
+	}
+	s.WriteString(inputLabelStyle.Render("Category: ") + catDisplay + "\n\n")
+
+	s.WriteString(inputLabelStyle.Render("Task:") + "\n")
+	s.WriteString(inputBorder.Render(m.taskInput.View()) + "\n")
+
+	s.WriteString("\n" + shortcutsStyle.Render("enter save • esc cancel") + "\n")
+
+	return s.String()
+}
+
+func (m model) renderFilterInput() string {
+	var s strings.Builder
+
+	s.WriteString(tasksHeadingStyle.Render("Filter by Category") + "\n\n")
+	s.WriteString(inputBorder.Render(m.filterInput.View()) + "\n")
+
+	// Show "All tasks" option
+	allStyle := dropdownItemStyle
+	if m.categoryCursor == -1 {
+		allStyle = dropdownSelectedStyle
+	}
+	s.WriteString(dropdownStyle.Render(allStyle.Render("All tasks (clear filter)")) + "\n")
+
+	// Render category dropdown
+	if len(m.filteredCategories) > 0 {
+		s.WriteString(m.renderCategoryDropdown())
+	}
+
+	s.WriteString("\n" + shortcutsStyle.Render("↑/↓ navigate • enter select • esc cancel") + "\n")
+
+	return s.String()
+}
+
+func (m model) renderCategoryDropdown() string {
+	var items []string
+
+	maxItems := 5
+	if len(m.filteredCategories) < maxItems {
+		maxItems = len(m.filteredCategories)
+	}
+
+	for i := 0; i < maxItems; i++ {
+		cat := m.filteredCategories[i]
+		style := dropdownItemStyle
+		prefix := "  "
+		if i == m.categoryCursor {
+			style = dropdownSelectedStyle
+			prefix = "> "
+		}
+		items = append(items, style.Render(prefix+cat.Name))
+	}
+
+	if len(m.filteredCategories) > maxItems {
+		items = append(items, dropdownItemStyle.Render(fmt.Sprintf("  ... and %d more", len(m.filteredCategories)-maxItems)))
+	}
+
+	return dropdownStyle.Render(strings.Join(items, "\n")) + "\n"
+}
+
+func (m model) renderTaskList() string {
+	var s strings.Builder
+
+	// Filter indicator
+	if m.filterCategory != nil {
+		s.WriteString(filterIndicatorStyle.Render(fmt.Sprintf("Filter: %s (%d tasks) • press esc to clear", m.filterCategory.Name, len(m.tasks))) + "\n")
+	}
+
+	s.WriteString(tasksHeadingStyle.Render("Tasks") + "\n")
 
 	if len(m.tasks) == 0 {
-		emptyMessage := `🌙 Nothing on your plate yet! 
-
-✨ Your task list is as empty as a zen garden ✨
-
-Ready to fill it with greatness? Press 'a' to add your first task!`
-		s += emptyStateStyle.Render(emptyMessage) + "\n"
+		if m.filterCategory != nil {
+			s.WriteString(emptyStateStyle.Render("No tasks in this category") + "\n")
+		} else {
+			s.WriteString(emptyStateStyle.Render("No tasks yet. Press 'a' to add one!") + "\n")
+		}
 	}
 
+	// Calculate max category width for alignment
+	maxCatWidth := m.calculateMaxCategoryWidth()
+
 	for idx, task := range m.tasks {
-		cursor := " "
+		cursor := "  "
 		if m.cursor == idx {
-			cursor = cursorStyle.Render(">")
+			cursor = cursorStyle.Render("> ")
 		}
 
 		checkbox := "[ ]"
@@ -101,16 +241,68 @@ Ready to fill it with greatness? Press 'a' to add your first task!`
 		}
 		checkbox = checkboxStyle.Render(checkbox)
 
+		// Category tag
+		catTag := m.formatCategoryTag(task.CategoryName, maxCatWidth)
+
+		// Task name
 		taskName := task.Name
-		taskDueDate := task.DueDate
 		if task.Completed == 1 {
 			taskName = completedTaskStyle.Render(taskName)
-			taskDueDate = completedTaskStyle.Render(taskDueDate)
 		}
 
-		s += listItemStyle.Render(fmt.Sprintf("%s %s %d. %s  %s", cursor, checkbox, idx+1, taskName, taskDueDate))
+		line := fmt.Sprintf("%s%s %s %s", cursor, checkbox, catTag, taskName)
+		s.WriteString(listItemStyle.Render(line) + "\n")
 	}
-	s += "\n" + shortcutsStyle.Render("Help: ↑/↓ - navigate | a - add a task | d - delete a task | enter - toggle completion | Press q to quit.") + "\n"
 
-	return s
+	// Help text
+	helpText := "↑/↓ navigate • a add • e edit • d delete • enter toggle • f filter • q quit"
+	if m.filterCategory != nil {
+		helpText = "↑/↓ navigate • a add • e edit • d delete • enter toggle • esc clear filter • q quit"
+	}
+	s.WriteString("\n" + shortcutsStyle.Render(helpText) + "\n")
+
+	return s.String()
+}
+
+func (m model) calculateMaxCategoryWidth() int {
+	maxWidth := 0
+	for _, task := range m.tasks {
+		if len(task.CategoryName) > maxWidth {
+			maxWidth = len(task.CategoryName)
+		}
+	}
+	// Cap at reasonable width for responsiveness
+	termWidth := m.width
+	if termWidth == 0 {
+		termWidth = 80
+	}
+	maxAllowed := termWidth / 4
+	if maxWidth > maxAllowed {
+		maxWidth = maxAllowed
+	}
+	return maxWidth
+}
+
+func (m model) formatCategoryTag(catName string, maxWidth int) string {
+	if catName == "" {
+		// Pad to align with other categories
+		if maxWidth > 0 {
+			return strings.Repeat(" ", maxWidth+2) // +2 for brackets
+		}
+		return ""
+	}
+
+	// Truncate if needed
+	displayName := catName
+	if len(displayName) > maxWidth && maxWidth > 3 {
+		displayName = displayName[:maxWidth-2] + ".."
+	}
+
+	// Pad for alignment
+	padding := ""
+	if len(displayName) < maxWidth {
+		padding = strings.Repeat(" ", maxWidth-len(displayName))
+	}
+
+	return categoryTagStyle.Render("["+displayName+"]") + padding
 }
