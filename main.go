@@ -20,20 +20,25 @@ const (
 	viewEditCategory
 	viewEditTask
 	viewFilter
+	viewCategoryManager
+	viewCategoryManagerEdit
 )
 
 type KeyMap struct {
-	Up     key.Binding
-	Down   key.Binding
-	Add    key.Binding
-	Delete key.Binding
-	Edit   key.Binding
-	Filter key.Binding
-	Enter  key.Binding
-	Escape key.Binding
-	Tab    key.Binding
-	Quit   key.Binding
-	Help   key.Binding
+	Up              key.Binding
+	Down            key.Binding
+	Add             key.Binding
+	More            key.Binding
+	Delete          key.Binding
+	Edit            key.Binding
+	Filter          key.Binding
+	Enter           key.Binding
+	Escape          key.Binding
+	Tab             key.Binding
+	Undo            key.Binding
+	Quit            key.Binding
+	Help            key.Binding
+	CategoryManager key.Binding
 }
 
 func (k KeyMap) ShortHelp() []key.Binding {
@@ -42,8 +47,8 @@ func (k KeyMap) ShortHelp() []key.Binding {
 
 func (k KeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{k.Up, k.Down, k.Add, k.Edit, k.Filter, k.Enter, k.Escape},
-		{k.Help, k.Quit},
+		{k.Up, k.Down, k.Add, k.Edit, k.Delete, k.Filter, k.Enter, k.Escape},
+		{k.More, k.Undo, k.Help, k.Quit},
 	}
 }
 
@@ -59,6 +64,10 @@ var DefaultKeyMap = KeyMap{
 	Add: key.NewBinding(
 		key.WithKeys("a"),
 		key.WithHelp("a", "add task"),
+	),
+	More: key.NewBinding(
+		key.WithKeys("tab"),
+		key.WithHelp("tab", "create more"),
 	),
 	Delete: key.NewBinding(
 		key.WithKeys("d"),
@@ -84,9 +93,17 @@ var DefaultKeyMap = KeyMap{
 		key.WithKeys("tab"),
 		key.WithHelp("tab", "autocomplete"),
 	),
+	Undo: key.NewBinding(
+		key.WithKeys("u"),
+		key.WithHelp("u", "undo delete"),
+	),
 	Quit: key.NewBinding(
 		key.WithKeys("q", "ctrl+c"),
 		key.WithHelp("q", "quit"),
+	),
+	CategoryManager: key.NewBinding(
+		key.WithKeys("c"),
+		key.WithHelp("c", "manage categories"),
 	),
 }
 
@@ -105,11 +122,21 @@ type model struct {
 	filteredCategories []Category
 	categoryCursor     int
 	selectedCategory   *Category
+	createMore         bool
 
 	// Filter state
-	filterCategory   *Category
-	filterInput      textinput.Model
-	allTasks         []Task
+	filterCategory *Category
+	filterInput    textinput.Model
+	allTasks       []Task
+
+	// Category manager state
+	categoryManagerCursor int
+	editingCategory       *Category
+	categoryEditInput     textinput.Model
+
+	// Undo stack for deleted tasks (session-only)
+	undoStack         []Task
+	categoryUndoStack []Category
 
 	// Terminal size
 	width  int
@@ -142,22 +169,29 @@ func initialModel(store *Store) model {
 	filterInput.CharLimit = 50
 	filterInput.Width = 40
 
+	categoryEditInput := textinput.New()
+	categoryEditInput.Placeholder = "Category name"
+	categoryEditInput.CharLimit = 50
+	categoryEditInput.Width = 40
+
 	return model{
-		tasks:              tasks,
-		allTasks:           tasks,
-		view:               viewList,
-		store:              store,
-		categoryInput:      catInput,
-		taskInput:          taskInput,
-		filterInput:        filterInput,
-		cursor:             -1,
-		categories:         categories,
-		filteredCategories: categories,
-		categoryCursor:     -1,
-		keyMap:             DefaultKeyMap,
-		help:               help.New(),
-		width:              80,
-		height:             24,
+		tasks:                 tasks,
+		allTasks:              tasks,
+		view:                  viewList,
+		store:                 store,
+		categoryInput:         catInput,
+		taskInput:             taskInput,
+		filterInput:           filterInput,
+		categoryEditInput:     categoryEditInput,
+		cursor:                -1,
+		categories:            categories,
+		filteredCategories:    categories,
+		categoryCursor:        -1,
+		categoryManagerCursor: 0,
+		keyMap:                DefaultKeyMap,
+		help:                  help.New(),
+		width:                 80,
+		height:                24,
 	}
 }
 
@@ -214,6 +248,7 @@ func (m *model) resetInputState() {
 	m.filterInput.SetValue("")
 	m.filterInput.Blur()
 	m.selectedCategory = nil
+	m.createMore = false
 	m.categoryCursor = -1
 	m.filteredCategories = m.categories
 }
@@ -241,6 +276,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case viewFilter:
 			return m.handleFilterView(msg)
+
+		case viewCategoryManager:
+			return m.handleCategoryManager(msg)
+
+		case viewCategoryManagerEdit:
+			return m.handleCategoryManagerEdit(msg)
 		}
 	}
 
@@ -257,6 +298,7 @@ func (m model) handleListView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.categoryInput.Focus()
 		m.categoryInput.SetValue("")
 		m.selectedCategory = nil
+		m.createMore = false
 		m.categoryCursor = -1
 		m.updateFilteredCategories()
 		return m, textinput.Blink
@@ -274,6 +316,7 @@ func (m model) handleListView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		} else {
 			m.selectedCategory = nil
 		}
+		m.createMore = false
 		m.categoryCursor = -1
 		m.updateFilteredCategories()
 		return m, textinput.Blink
@@ -286,17 +329,43 @@ func (m model) handleListView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.updateFilteredCategories()
 		return m, textinput.Blink
 
+	case key.Matches(msg, m.keyMap.CategoryManager):
+		m.view = viewCategoryManager
+		m.refreshCategories()
+		m.categoryManagerCursor = 0
+		if len(m.categories) == 0 {
+			m.categoryManagerCursor = -1
+		}
+		return m, nil
+
 	case key.Matches(msg, m.keyMap.Delete):
 		if len(m.tasks) == 0 || m.cursor < 0 || m.cursor >= len(m.tasks) {
 			return m, nil
 		}
 		taskToDelete := m.tasks[m.cursor]
 		if err := m.store.deleteTask(taskToDelete); err == nil {
+			m.undoStack = append(m.undoStack, taskToDelete)
 			m.refreshTasks()
 			if m.cursor >= len(m.tasks) && len(m.tasks) > 0 {
 				m.cursor = len(m.tasks) - 1
 			} else if len(m.tasks) == 0 {
 				m.cursor = -1
+			}
+		}
+
+	case key.Matches(msg, m.keyMap.Undo):
+		if len(m.undoStack) == 0 {
+			return m, nil
+		}
+		taskToRestore := m.undoStack[len(m.undoStack)-1]
+		m.undoStack = m.undoStack[:len(m.undoStack)-1]
+		if err := m.store.saveTask(taskToRestore); err == nil {
+			m.refreshTasks()
+			for i, t := range m.tasks {
+				if t.ID == taskToRestore.ID {
+					m.cursor = i
+					break
+				}
 			}
 		}
 
@@ -421,6 +490,10 @@ func (m model) handleTaskInput(msg tea.KeyMsg, store *Store) (tea.Model, tea.Cmd
 		m.view = viewList
 		return m, nil
 
+	case m.view == viewAddTask && key.Matches(msg, m.keyMap.More):
+		m.createMore = !m.createMore
+		return m, nil
+
 	case key.Matches(msg, m.keyMap.Enter):
 		taskName := m.taskInput.Value()
 		if taskName == "" {
@@ -464,6 +537,12 @@ func (m model) handleTaskInput(msg tea.KeyMsg, store *Store) (tea.Model, tea.Cmd
 		if err := store.saveTask(task); err == nil {
 			m.refreshTasks()
 			m.refreshCategories()
+		}
+
+		if m.view == viewAddTask && m.createMore {
+			m.taskInput.SetValue("")
+			m.taskInput.Focus()
+			return m, textinput.Blink
 		}
 
 		m.resetInputState()
@@ -520,6 +599,123 @@ func (m model) handleFilterView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	m.filterInput, cmd = m.filterInput.Update(msg)
 	m.updateFilteredCategories()
+	return m, cmd
+}
+
+func (m model) handleCategoryManager(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case key.Matches(msg, m.keyMap.Quit):
+		return m, tea.Quit
+
+	case key.Matches(msg, m.keyMap.Escape):
+		m.view = viewList
+		return m, nil
+
+	case key.Matches(msg, m.keyMap.Up):
+		if m.categoryManagerCursor > 0 {
+			m.categoryManagerCursor--
+		}
+		return m, nil
+
+	case key.Matches(msg, m.keyMap.Down):
+		if m.categoryManagerCursor < len(m.categories)-1 {
+			m.categoryManagerCursor++
+		}
+		return m, nil
+
+	case key.Matches(msg, m.keyMap.Add):
+		m.view = viewCategoryManagerEdit
+		m.editingCategory = nil
+		m.categoryEditInput.SetValue("")
+		m.categoryEditInput.Focus()
+		return m, textinput.Blink
+
+	case key.Matches(msg, m.keyMap.Edit):
+		if len(m.categories) == 0 || m.categoryManagerCursor < 0 {
+			return m, nil
+		}
+		cat := m.categories[m.categoryManagerCursor]
+		m.view = viewCategoryManagerEdit
+		m.editingCategory = &cat
+		m.categoryEditInput.SetValue(cat.Name)
+		m.categoryEditInput.Focus()
+		return m, textinput.Blink
+
+	case key.Matches(msg, m.keyMap.Delete):
+		if len(m.categories) == 0 || m.categoryManagerCursor < 0 {
+			return m, nil
+		}
+		catToDelete := m.categories[m.categoryManagerCursor]
+		if err := m.store.deleteCategory(catToDelete.ID); err == nil {
+			m.categoryUndoStack = append(m.categoryUndoStack, catToDelete)
+			m.refreshCategories()
+			if m.categoryManagerCursor >= len(m.categories) && len(m.categories) > 0 {
+				m.categoryManagerCursor = len(m.categories) - 1
+			} else if len(m.categories) == 0 {
+				m.categoryManagerCursor = -1
+			}
+			m.refreshTasks()
+		}
+		return m, nil
+
+	case key.Matches(msg, m.keyMap.Undo):
+		if len(m.categoryUndoStack) == 0 {
+			return m, nil
+		}
+		catToRestore := m.categoryUndoStack[len(m.categoryUndoStack)-1]
+		m.categoryUndoStack = m.categoryUndoStack[:len(m.categoryUndoStack)-1]
+		if _, err := m.store.createCategory(catToRestore.Name); err == nil {
+			m.refreshCategories()
+			for i, c := range m.categories {
+				if c.Name == catToRestore.Name {
+					m.categoryManagerCursor = i
+					break
+				}
+			}
+		}
+		return m, nil
+	}
+
+	return m, nil
+}
+
+func (m model) handleCategoryManagerEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+
+	switch {
+	case key.Matches(msg, m.keyMap.Escape):
+		m.categoryEditInput.Blur()
+		m.categoryEditInput.SetValue("")
+		m.editingCategory = nil
+		m.view = viewCategoryManager
+		return m, nil
+
+	case key.Matches(msg, m.keyMap.Enter):
+		name := m.categoryEditInput.Value()
+		if name == "" {
+			return m, nil
+		}
+
+		if m.editingCategory != nil {
+			if err := m.store.updateCategory(m.editingCategory.ID, name); err == nil {
+				m.refreshCategories()
+				m.refreshTasks()
+			}
+		} else {
+			if _, err := m.store.createCategory(name); err == nil {
+				m.refreshCategories()
+				m.categoryManagerCursor = len(m.categories) - 1
+			}
+		}
+
+		m.categoryEditInput.Blur()
+		m.categoryEditInput.SetValue("")
+		m.editingCategory = nil
+		m.view = viewCategoryManager
+		return m, nil
+	}
+
+	m.categoryEditInput, cmd = m.categoryEditInput.Update(msg)
 	return m, cmd
 }
 

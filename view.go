@@ -104,6 +104,10 @@ func (m model) View() string {
 		s.WriteString(m.renderTaskInput())
 	case viewFilter:
 		s.WriteString(m.renderFilterInput())
+	case viewCategoryManager:
+		s.WriteString(m.renderCategoryManager())
+	case viewCategoryManagerEdit:
+		s.WriteString(m.renderCategoryManagerEdit())
 	default:
 		s.WriteString(m.renderTaskList())
 	}
@@ -153,6 +157,16 @@ func (m model) renderTaskInput() string {
 
 	s.WriteString(inputLabelStyle.Render("Task:") + "\n")
 	s.WriteString(inputBorder.Render(m.taskInput.View()) + "\n")
+
+	if m.view == viewAddTask {
+		modeLabel := "off"
+		if m.createMore {
+			modeLabel = "on"
+		}
+		s.WriteString("\n" + shortcutsStyle.Render("Create more: "+modeLabel+" • press tab to toggle") + "\n")
+		s.WriteString(shortcutsStyle.Render("enter save • esc exit • tab toggle create more") + "\n")
+		return s.String()
+	}
 
 	s.WriteString("\n" + shortcutsStyle.Render("enter save • esc cancel") + "\n")
 
@@ -255,9 +269,9 @@ func (m model) renderTaskList() string {
 	}
 
 	// Help text
-	helpText := "↑/↓ navigate • a add • e edit • d delete • enter toggle • f filter • q quit"
+	helpText := "↑/↓ navigate • a add • e edit • d delete • enter toggle • f filter • c categories • q quit"
 	if m.filterCategory != nil {
-		helpText = "↑/↓ navigate • a add • e edit • d delete • enter toggle • esc clear filter • q quit"
+		helpText = "↑/↓ navigate • a add • e edit • d delete • enter toggle • esc clear filter • c categories • q quit"
 	}
 	s.WriteString("\n" + shortcutsStyle.Render(helpText) + "\n")
 
@@ -305,4 +319,48 @@ func (m model) formatCategoryTag(catName string, maxWidth int) string {
 	}
 
 	return categoryTagStyle.Render("["+displayName+"]") + padding
+}
+
+func (m model) renderCategoryManager() string {
+	var s strings.Builder
+
+	s.WriteString(tasksHeadingStyle.Render("Manage Categories") + "\n")
+
+	if len(m.categories) == 0 {
+		s.WriteString(emptyStateStyle.Render("No categories yet. Press 'a' to add one!") + "\n")
+	} else {
+		for idx, cat := range m.categories {
+			cursor := "  "
+			if m.categoryManagerCursor == idx {
+				cursor = cursorStyle.Render("> ")
+			}
+
+			taskCount, _ := m.store.getTaskCountByCategory(cat.ID)
+			countStr := fmt.Sprintf("(%d tasks)", taskCount)
+
+			line := fmt.Sprintf("%s%s %s", cursor, categoryTagStyle.Render(cat.Name), shortcutsStyle.Render(countStr))
+			s.WriteString(listItemStyle.Render(line) + "\n")
+		}
+	}
+
+	s.WriteString("\n" + shortcutsStyle.Render("↑/↓ navigate • a add • e edit • d delete • u undo • esc back • q quit") + "\n")
+
+	return s.String()
+}
+
+func (m model) renderCategoryManagerEdit() string {
+	var s strings.Builder
+
+	title := "Add Category"
+	if m.editingCategory != nil {
+		title = "Edit Category"
+	}
+	s.WriteString(tasksHeadingStyle.Render(title) + "\n\n")
+
+	s.WriteString(inputLabelStyle.Render("Category Name:") + "\n")
+	s.WriteString(inputBorder.Render(m.categoryEditInput.View()) + "\n")
+
+	s.WriteString("\n" + shortcutsStyle.Render("enter save • esc cancel") + "\n")
+
+	return s.String()
 }

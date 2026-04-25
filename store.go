@@ -2,6 +2,8 @@ package main
 
 import (
 	"database/sql"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -29,9 +31,27 @@ type Store struct {
 	conn *sql.DB
 }
 
+func dbPath() (string, error) {
+	configDir, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
+	}
+
+	appDir := filepath.Join(configDir, "taskui")
+	if err := os.MkdirAll(appDir, 0o755); err != nil {
+		return "", err
+	}
+
+	return filepath.Join(appDir, "taskui.db"), nil
+}
+
 func (s *Store) InitDb() error {
-	var err error
-	s.conn, err = sql.Open("sqlite3", "./taskui.db")
+	path, err := dbPath()
+	if err != nil {
+		return err
+	}
+
+	s.conn, err = sql.Open("sqlite3", path)
 	if err != nil {
 		return err
 	}
@@ -294,4 +314,27 @@ func (s *Store) updateTaskCompletion(taskID int64, completed int) error {
 		return err
 	}
 	return nil
+}
+
+func (s *Store) updateCategory(id int64, name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil
+	}
+	query := `UPDATE categories SET name = ? WHERE id = ?`
+	_, err := s.conn.Exec(query, name, id)
+	return err
+}
+
+func (s *Store) deleteCategory(id int64) error {
+	query := `DELETE FROM categories WHERE id = ?`
+	_, err := s.conn.Exec(query, id)
+	return err
+}
+
+func (s *Store) getTaskCountByCategory(categoryID int64) (int, error) {
+	query := `SELECT COUNT(*) FROM tasks WHERE category_id = ?`
+	var count int
+	err := s.conn.QueryRow(query, categoryID).Scan(&count)
+	return count, err
 }
