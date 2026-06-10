@@ -13,7 +13,7 @@ A terminal-based task management application built with Go and Bubble Tea.
 
 - `main.go` - Application entry point, model definition, key bindings, and update logic
 - `view.go` - View rendering and styling
-- `store.go` - SQLite database operations and Task struct
+- `store.go` - SQLite database operations and Task/Category structs
 
 ## Commands
 
@@ -32,7 +32,15 @@ go build ./...
 
 - Single package (`main`) application
 - Bubble Tea Model-View-Update (MVU) architecture
-- View modes: `list` (0), `edit` (1), `add` (2)
+- View modes (defined in main.go:16-25):
+  - `viewList` (0) - main task list
+  - `viewAddCategory` (1) - category input for new task
+  - `viewAddTask` (2) - task input for new task
+  - `viewEditCategory` (3) - category input for editing
+  - `viewEditTask` (4) - task input for editing
+  - `viewFilter` (5) - category filter selection
+  - `viewCategoryManager` (6) - manage categories list
+  - `viewCategoryManagerEdit` (7) - add/edit category
 - Styles defined as package-level variables in view.go
 - Store methods use pointer receivers except for read-only operations
 - Time format for SQLite: `"2006-01-02 15:04:05"`
@@ -47,5 +55,26 @@ go build ./...
 | `enter` | Toggle completion / confirm |
 | `j`/`↓` | Move down |
 | `k`/`↑` | Move up |
-| `esc` | Cancel edit/add |
+| `f`/`/` | Filter by category |
+| `c` | Manage categories |
+| `u` | Undo delete (task or category) |
+| `s` | Cycle task status (todo → in-progress → blocked) |
+| `tab` | Autocomplete category / toggle create-more mode |
+| `esc` | Cancel edit/add / clear filter / go back |
 | `q`/`ctrl+c` | Quit |
+
+## Database
+
+- SQLite database stored at `~/.config/taskui/taskui.db` (user config dir)
+- Tables: `categories` and `tasks` with foreign key relationship
+- Auto-migration adds `category_id` column to existing databases
+- Completed tasks older than 1 day are hidden from default queries
+
+## Architecture Notes
+
+- All state lives in `model` struct (main.go:110-147)
+- No tests currently in the project
+- Database uses upsert (`ON CONFLICT`) for task saves
+- Categories are case-insensitive unique (COLLATE NOCASE)
+- Undo stacks are session-only (in-memory, not persisted)
+- Task status: `todo` (default), `in-progress`, `blocked` — cycled via `s` key, displayed as colored badge at end of task line

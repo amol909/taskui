@@ -39,6 +39,7 @@ type KeyMap struct {
 	Quit            key.Binding
 	Help            key.Binding
 	CategoryManager key.Binding
+	Status          key.Binding
 }
 
 func (k KeyMap) ShortHelp() []key.Binding {
@@ -47,7 +48,7 @@ func (k KeyMap) ShortHelp() []key.Binding {
 
 func (k KeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{k.Up, k.Down, k.Add, k.Edit, k.Delete, k.Filter, k.Enter, k.Escape},
+		{k.Up, k.Down, k.Add, k.Edit, k.Delete, k.Filter, k.Status, k.Enter, k.Escape},
 		{k.More, k.Undo, k.Help, k.Quit},
 	}
 }
@@ -104,6 +105,10 @@ var DefaultKeyMap = KeyMap{
 	CategoryManager: key.NewBinding(
 		key.WithKeys("c"),
 		key.WithHelp("c", "manage categories"),
+	),
+	Status: key.NewBinding(
+		key.WithKeys("s"),
+		key.WithHelp("s", "cycle status"),
 	),
 }
 
@@ -389,6 +394,16 @@ func (m model) handleListView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			newCompleted = 1
 		}
 		if err := m.store.updateTaskCompletion(currentTask.ID, newCompleted); err == nil {
+			m.refreshTasks()
+		}
+
+	case key.Matches(msg, m.keyMap.Status):
+		if len(m.tasks) == 0 || m.cursor < 0 || m.cursor >= len(m.tasks) {
+			return m, nil
+		}
+		currentTask := m.tasks[m.cursor]
+		newStatus := nextStatus(currentTask.Status)
+		if err := m.store.updateTaskStatus(currentTask.ID, newStatus); err == nil {
 			m.refreshTasks()
 		}
 
@@ -717,6 +732,19 @@ func (m model) handleCategoryManagerEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	m.categoryEditInput, cmd = m.categoryEditInput.Update(msg)
 	return m, cmd
+}
+
+func nextStatus(current string) string {
+	switch current {
+	case "todo":
+		return "in-progress"
+	case "in-progress":
+		return "blocked"
+	case "blocked":
+		return "todo"
+	default:
+		return "todo"
+	}
 }
 
 func main() {

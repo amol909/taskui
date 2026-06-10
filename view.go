@@ -82,6 +82,17 @@ var (
 				Bold(true).
 				Padding(0, 1).
 				MarginBottom(1)
+
+	statusTodoStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#888888"))
+
+	statusInProgressStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#36b8ff")).
+			Bold(true)
+
+	statusBlockedStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#ff6b6b")).
+			Bold(true)
 )
 
 var greetingText = `  _____  _    ____  _  ___   _ ___
@@ -264,14 +275,17 @@ func (m model) renderTaskList() string {
 			taskName = completedTaskStyle.Render(taskName)
 		}
 
-		line := fmt.Sprintf("%s%s %s %s", cursor, checkbox, catTag, taskName)
+		// Status badge
+		statusBadge := m.formatStatusBadge(task.Status)
+
+		line := fmt.Sprintf("%s%s %s %s %s", cursor, checkbox, catTag, taskName, statusBadge)
 		s.WriteString(listItemStyle.Render(line) + "\n")
 	}
 
 	// Help text
-	helpText := "↑/↓ navigate • a add • e edit • d delete • enter toggle • f filter • c categories • q quit"
+	helpText := "↑/↓ navigate • a add • e edit • d delete • enter toggle • s status • f filter • c categories • q quit"
 	if m.filterCategory != nil {
-		helpText = "↑/↓ navigate • a add • e edit • d delete • enter toggle • esc clear filter • c categories • q quit"
+		helpText = "↑/↓ navigate • a add • e edit • d delete • enter toggle • s status • esc clear filter • c categories • q quit"
 	}
 	s.WriteString("\n" + shortcutsStyle.Render(helpText) + "\n")
 
@@ -319,6 +333,17 @@ func (m model) formatCategoryTag(catName string, maxWidth int) string {
 	}
 
 	return categoryTagStyle.Render("["+displayName+"]") + padding
+}
+
+func (m model) formatStatusBadge(status string) string {
+	switch status {
+	case "in-progress":
+		return statusInProgressStyle.Render("[in-progress]")
+	case "blocked":
+		return statusBlockedStyle.Render("[blocked]")
+	default:
+		return statusTodoStyle.Render("[todo]")
+	}
 }
 
 func (m model) renderCategoryManager() string {

@@ -21,6 +21,7 @@ type Task struct {
 	Name         string
 	DueDate      string
 	Completed    int
+	Status       string
 	CategoryID   sql.NullInt64
 	CategoryName string
 	CreatedAt    time.Time
@@ -67,6 +68,7 @@ func (s *Store) InitDb() error {
 		name TEXT NOT NULL,
 		due_date TEXT,
 		completed INTEGER DEFAULT 0,
+		status TEXT DEFAULT 'todo',
 		category_id INTEGER,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -82,6 +84,9 @@ func (s *Store) InitDb() error {
 
 	// Add category_id column if it doesn't exist (migration for existing DBs)
 	s.conn.Exec(`ALTER TABLE tasks ADD COLUMN category_id INTEGER REFERENCES categories(id) ON DELETE SET NULL`)
+
+	// Add status column if it doesn't exist (migration for existing DBs)
+	s.conn.Exec(`ALTER TABLE tasks ADD COLUMN status TEXT DEFAULT 'todo'`)
 
 	return nil
 }
@@ -208,7 +213,7 @@ func (s *Store) getOrCreateCategory(name string) (*Category, error) {
 // Task methods
 
 func (s *Store) getAllTasks() ([]Task, error) {
-	query := `SELECT t.id, t.name, t.due_date, t.completed, t.category_id, COALESCE(c.name, ''), t.created_at, t.updated_at 
+	query := `SELECT t.id, t.name, t.due_date, t.completed, t.status, t.category_id, COALESCE(c.name, ''), t.created_at, t.updated_at 
 			  FROM tasks t
 			  LEFT JOIN categories c ON t.category_id = c.id
 			  WHERE NOT (t.completed = 1 AND t.created_at < datetime('now', '-1 day'))
@@ -218,7 +223,7 @@ func (s *Store) getAllTasks() ([]Task, error) {
 }
 
 func (s *Store) getTasksByCategory(categoryID int64) ([]Task, error) {
-	query := `SELECT t.id, t.name, t.due_date, t.completed, t.category_id, COALESCE(c.name, ''), t.created_at, t.updated_at 
+	query := `SELECT t.id, t.name, t.due_date, t.completed, t.status, t.category_id, COALESCE(c.name, ''), t.created_at, t.updated_at 
 			  FROM tasks t
 			  LEFT JOIN categories c ON t.category_id = c.id
 			  WHERE t.category_id = ?
@@ -235,7 +240,7 @@ func (s *Store) getTasksByCategory(categoryID int64) ([]Task, error) {
 }
 
 func (s *Store) getUncategorizedTasks() ([]Task, error) {
-	query := `SELECT t.id, t.name, t.due_date, t.completed, t.category_id, '', t.created_at, t.updated_at 
+	query := `SELECT t.id, t.name, t.due_date, t.completed, t.status, t.category_id, '', t.created_at, t.updated_at 
 			  FROM tasks t
 			  WHERE t.category_id IS NULL
 			  AND NOT (t.completed = 1 AND t.created_at < datetime('now', '-1 day'))
@@ -259,9 +264,13 @@ func (s *Store) scanTasks(rows *sql.Rows) ([]Task, error) {
 	for rows.Next() {
 		var task Task
 		var createdAtStr, updatedAtStr string
-		err := rows.Scan(&task.ID, &task.Name, &task.DueDate, &task.Completed, &task.CategoryID, &task.CategoryName, &createdAtStr, &updatedAtStr)
+		err := rows.Scan(&task.ID, &task.Name, &task.DueDate, &task.Completed, &task.Status, &task.CategoryID, &task.CategoryName, &createdAtStr, &updatedAtStr)
 		if err != nil {
 			return nil, err
+		}
+
+		if task.Status == "" {
+			task.Status = "todo"
 		}
 
 		if task.CreatedAt, err = time.Parse("2006-01-02 15:04:05", createdAtStr); err != nil {
@@ -281,10 +290,14 @@ func (s *Store) saveTask(task Task) error {
 		task.ID = time.Now().UTC().Unix()
 	}
 
+	if task.Status == "" {
+		task.Status = "todo"
+	}
+
 	now := time.Now()
-	upsertQuery := `INSERT INTO tasks (id, name, due_date, completed, category_id, created_at, updated_at)
-	VALUES (?, ?, ?, ?, ?, ?, ?)
-	ON CONFLICT(id) DO UPDATE SET name=excluded.name, due_date=excluded.due_date, completed=excluded.completed, category_id=excluded.category_id, updated_at=excluded.updated_at;`
+	upsertQuery := `INSERT INTO tasks (id, name, due_date, completed, status, category_id, created_at, updated_at)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	ON CONFLICT(id) DO UPDATE SET name=excluded.name, due_date=excluded.due_date, completed=excluded.completed, status=excluded.status, category_id=excluded.category_id, updated_at=excluded.updated_at;`
 
 	var categoryID interface{}
 	if task.CategoryID.Valid {
@@ -293,7 +306,7 @@ func (s *Store) saveTask(task Task) error {
 		categoryID = nil
 	}
 
-	if _, err := s.conn.Exec(upsertQuery, task.ID, task.Name, task.DueDate, task.Completed, categoryID, task.CreatedAt.Format("2006-01-02 15:04:05"), now.Format("2006-01-02 15:04:05")); err != nil {
+	if _, err := s.conn.Exec(upsertQuery, task.ID, task.Name, task.DueDate, task.Completed, task.Status, categoryID, task.CreatedAt.Format("2006-01-02 15:04:05"), now.Format("2006-01-02 15:04:05")); err != nil {
 		return err
 	}
 	return nil
@@ -311,6 +324,15 @@ func (s *Store) updateTaskCompletion(taskID int64, completed int) error {
 	now := time.Now()
 	updateQuery := `UPDATE tasks SET completed = ?, updated_at = ? WHERE id = ?`
 	if _, err := s.conn.Exec(updateQuery, completed, now.Format("2006-01-02 15:04:05"), taskID); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Store) updateTaskStatus(taskID int64, status string) error {
+	now := time.Now()
+	updateQuery := `UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?`
+	if _, err := s.conn.Exec(updateQuery, status, now.Format("2006-01-02 15:04:05"), taskID); err != nil {
 		return err
 	}
 	return nil
