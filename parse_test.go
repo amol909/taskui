@@ -309,6 +309,103 @@ func TestParseTask_RecurrenceBeatsBareWeekday(t *testing.T) {
 	}
 }
 
+// TestParseTask_RecurrenceWithBareTime covers the bug where a bare time on a
+// recurring task anchored the first occurrence to *today* at that time,
+// ignoring the rule: "standup every monday 9:30am" typed on a Wednesday came
+// out due Wednesday 09:30 (already overdue) instead of Monday 09:30. The
+// bare-time switch case ran before the recurrence one and won.
+//
+// The cases below pin the two halves of the fix: an anchored rule (weekday,
+// last-day-of-month) always resolves through its own grid even when the
+// requested time is still ahead today, while an unanchored rule ("every day")
+// may legitimately start today because nothing has fixed its grid yet.
+func TestParseTask_RecurrenceWithBareTime(t *testing.T) {
+	mon17 := time.Date(2026, 8, 17, 13, 0, 0, 0, time.Local) // a Monday, 13:00
+	mon17Early := time.Date(2026, 8, 17, 8, 0, 0, 0, time.Local)
+
+	tests := []struct {
+		name  string
+		input string
+		now   time.Time
+		want  time.Time
+	}{
+		{
+			name:  "weekday rule does not collapse onto today",
+			input: "standup every monday 9:30am",
+			now:   testNow, // Wed 12 Aug 10:00
+			want:  dt(2026, 8, 17, 9, 30),
+		},
+		{
+			name:  "weekday rule holds even when the time is still ahead today",
+			input: "standup every monday 11:59pm",
+			now:   testNow,
+			want:  dt(2026, 8, 17, 23, 59),
+		},
+		{
+			name:  "on the grid day, an already-passed time moves to the next one",
+			input: "standup every monday 9:30am",
+			now:   mon17,
+			want:  dt(2026, 8, 24, 9, 30),
+		},
+		{
+			name:  "on the grid day, a time still ahead stays today",
+			input: "standup every monday 9:30am",
+			now:   mon17Early,
+			want:  dt(2026, 8, 17, 9, 30),
+		},
+		{
+			name:  "unanchored rule may start today when the time is ahead",
+			input: "gym every day 11:59pm",
+			now:   testNow,
+			want:  dt(2026, 8, 12, 23, 59),
+		},
+		{
+			name:  "unanchored rule rolls forward when the time has passed",
+			input: "gym every day 9am",
+			now:   testNow,
+			want:  dt(2026, 8, 13, 9, 0),
+		},
+		{
+			name:  "last day of month keeps the requested time",
+			input: "rent last day of month 5pm",
+			now:   testNow,
+			want:  dt(2026, 8, 31, 17, 0),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := ParseTask(tt.input, tt.now)
+			if p.DueAt == nil {
+				t.Fatalf("DueAt = nil, want %v", tt.want)
+			}
+			if !p.DueAt.Equal(tt.want) {
+				t.Errorf("DueAt = %v, want %v", p.DueAt, tt.want)
+			}
+			if !p.DueHasTime {
+				t.Errorf("DueHasTime = false, want true (an explicit time was given)")
+			}
+			if p.DueAt.Before(tt.now) {
+				t.Errorf("DueAt = %v is before now = %v; a first occurrence must not start overdue", p.DueAt, tt.now)
+			}
+		})
+	}
+}
+
+// TestParseTask_ExplicitDateStillBeatsRecurrence guards the boundary of the
+// fix above: an explicit date plus a time is used verbatim, so a recurrence
+// in the same input does not move it.
+func TestParseTask_ExplicitDateStillBeatsRecurrence(t *testing.T) {
+	p := ParseTask("standup every monday aug 20 9:30am", testNow)
+	want := dt(2026, 8, 20, 9, 30)
+	if p.DueAt == nil || !p.DueAt.Equal(want) {
+		t.Errorf("DueAt = %v, want %v (the explicit date wins)", p.DueAt, want)
+	}
+	if p.Recur != "every monday" {
+		t.Errorf("Recur = %q, want %q", p.Recur, "every monday")
+	}
+}
+
 func TestParseTask_RecurrencePhrases(t *testing.T) {
 	tests := []struct {
 		input string

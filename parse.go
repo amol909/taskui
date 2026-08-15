@@ -521,6 +521,37 @@ func ParseTask(input string, now time.Time) ParsedTask {
 		dueAt = &d
 		dueHasTime = dateHasTime
 		tokens = append(tokens, Token{Start: dateSpan.start, End: dateSpan.end, Kind: TokenDue})
+	case recurFound && timeFound:
+		// A recurrence plus a bare time ("standup every monday 9:30am"):
+		// the time belongs to the rule's first occurrence, not to today.
+		// This case must precede the bare-timeFound one below, which would
+		// otherwise anchor the task to today at that time and ignore the
+		// recurrence entirely.
+		//
+		// Anchor on a "now" already carrying the requested clock time, so
+		// whichever grid point First picks keeps that time rather than the
+		// wall-clock time of capture. An anchored rule (a weekday, or the
+		// last day of the month) has an absolute grid, so it must always go
+		// through First; an unanchored one ("every day", "every 2 weeks")
+		// has no grid until this first occurrence defines it, so it may
+		// legitimately start today if the requested time is still ahead.
+		anchor := time.Date(now.Year(), now.Month(), now.Day()+dayOffset, hour, minute, 0, 0, now.Location())
+		anchored := recurRule.HasWeekday || recurRule.MonthDay == -1
+
+		first := anchor
+		if anchored || first.Before(now) {
+			first = recurRule.First(anchor)
+		}
+		// First can still land in the past when today is itself a grid point
+		// whose time has already passed (a Monday at 13:00, "every monday
+		// 9:30am"); step on by whole intervals until it isn't.
+		for first.Before(now) {
+			first = recurRule.Next(first)
+		}
+
+		dueAt = &first
+		dueHasTime = true
+		tokens = append(tokens, Token{Start: timeSpan.start, End: timeSpan.end, Kind: TokenDue})
 	case timeFound:
 		today := dateOnly(now)
 		combined := time.Date(today.Year(), today.Month(), today.Day()+dayOffset, hour, minute, 0, 0, now.Location())

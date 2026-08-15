@@ -120,11 +120,10 @@ Thursday is due the *coming* Tuesday, not a week the following Tuesday, and
 `last day of month` typed on the 13th is due the end of *this* month. Give an
 explicit date and it's used as-is.
 
-> **Known issue:** adding a bare *time* to a recurring task anchors the first
-> occurrence to **today** at that time, overriding the rule above -
-> `every monday 9:30am` typed on a Saturday is due today 09:30 (already
-> overdue), not Monday 09:30. Omit the time, or set the due date explicitly,
-> until this is fixed. Later occurrences are unaffected.
+A bare time applies to that first occurrence rather than to today, so
+`standup every monday 9:30am` typed on a Saturday is due Monday 09:30, not
+Saturday. A rule with no fixed grid can still start today when the time is
+still ahead - `gym every day 11:59pm` typed at lunchtime is due tonight.
 
 The next occurrence is created only when a task goes from open to complete, and
 it's anchored on the task's own due date rather than on the moment you ticked
