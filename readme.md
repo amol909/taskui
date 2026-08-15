@@ -6,6 +6,56 @@ A fast, keyboard-first terminal task manager built with Go, Bubble Tea, and SQLi
   <img src="assets/taskui-screenshot.png" alt="TaskUI screenshot" width="1200" />
 </p>
 
+## Quickstart
+
+```bash
+go install github.com/amol909/taskui@latest
+```
+
+That installs a binary called **`taskui`**. The docs below all say `tl`, which
+is what the Makefile installs it as and what the CLI calls itself - rename it
+if you want the short name:
+
+```bash
+mv "$(go env GOPATH)/bin/taskui" "$(go env GOPATH)/bin/tl"
+```
+
+Make sure `$(go env GOPATH)/bin` is on your `PATH`. Then:
+
+```bash
+cd ~/code/my-project           # tasks are filed against the project you're in
+tl add "fix the login bug tomorrow 5pm #bugs !high"
+tl ls                          # list this project's tasks
+tl                             # launch the TUI
+```
+
+### A normal day
+
+Inside the TUI:
+
+- **`a`** to add a task - type it as one line and the due date, category,
+  priority and status are pulled out as you type (`pay rent friday 5pm
+  #finance !high`)
+- **`1`** for Today, **`2`** for Overdue, **`g`** for the full agenda
+- **`enter`** to complete the task under the cursor, **`s`** to cycle its
+  status, **`e`** to edit, **`d`** to delete, **`u`** to undo
+- **`A`** to see every project at once, **`P`** to jump to another one
+- **`ctrl+k`** when you can't remember a key - the command palette lists
+  everything available right now and shows each command's shortcut
+- **`q`** to quit
+
+From the shell, without opening the TUI:
+
+```bash
+tl add "review the PR tomorrow"    # capture and get on with what you were doing
+tl ls --agenda                     # what's on
+tl ls --all                        # across every project, not just this one
+tl done 3                          # tick one off
+```
+
+There's nothing to configure and no server - tasks go into a single SQLite
+file in your user config directory.
+
 ## What it does
 
 TaskUI helps you manage personal tasks directly from the terminal with a clean TUI experience. You can organize tasks by category, project, due date and priority, quickly capture new items in natural language, filter what you see, and keep everything stored locally in SQLite. The same database is also reachable headlessly via the `tl` command, so you can add or list tasks from a script or shell alias without opening the TUI.
@@ -15,7 +65,7 @@ TaskUI helps you manage personal tasks directly from the terminal with a clean T
 - **Terminal-first workflow** with a polished Bubble Tea interface
 - **Persistent storage** using SQLite
 - **Natural-language quick capture** - type `pay rent tomorrow 5pm #finance !high` and it just works
-- **Recurring tasks** - `standup every weekday`, `rent last day of month`; completing one spawns the next
+- **Recurring tasks** - `standup every monday`, `rent last day of month`; completing one spawns the next
 - **Due dates and priority** with an overdue indicator in the task list
 - **Agenda view** grouping everything into Overdue / Today / Tomorrow / This week / Later
 - **Task categories** to group related work
@@ -281,14 +331,17 @@ $ tl add "fix the flaky store test tomorrow 5pm #testing !high"
 Exit codes: `0` success, `1` user error (bad args, no such task), `2`
 internal error (e.g. a database failure).
 
-## Build and run
+## Building from source
+
+Cloning and using the Makefile installs it as `tl` directly, with no rename:
 
 ```bash
-make install   # builds and installs to $GOBIN/tl (or $GOPATH/bin/tl)
-tl             # launch the TUI
+git clone https://github.com/amol909/taskui.git
+cd taskui
+make install   # -> $GOBIN/tl (or $GOPATH/bin/tl)
 ```
 
-Make sure that directory is on your `PATH`. Other targets:
+Other targets:
 
 ```bash
 make build     # ./tl, without installing
@@ -301,6 +354,10 @@ Or run straight from source without building:
 ```bash
 go run .
 ```
+
+The whole app is a single `main` package at the repo root, so `go build .` is
+all it takes. Note that `make build` writes `./tl` into the working tree and
+does **not** update an installed copy - use `make install` for that.
 
 ## Notes
 
