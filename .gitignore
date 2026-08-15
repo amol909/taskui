@@ -1,2 +1,14 @@
 # Binaries for programs and plugins
 /taskui
+/tl
+
+# Local Go build cache
+/.gocache/
+
+# Task databases - these hold real task data and must never be committed
+*.db
+*.db-wal
+*.db-shm
+
+# macOS
+.DS_Store
